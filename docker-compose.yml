@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  marketplace-app-mvp:
+    container_name: marketplace-app-mvp
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3210:3210"
+    environment:
+      NODE_ENV: production
+      PORT: 3210
+      DATA_DIR: /data
+    volumes:
+      - /data/www/marketplace-app-app:/data
+

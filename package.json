@@ -1,0 +1,22 @@
+{
+  "name": "marketplace-app-app",
+  "version": "1.0.0",
+  "description": "GHL Marketplace OAuth MVP (agency + location install flows)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node -e \"console.log('No automated tests yet for MVP scaffold')\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0"
+  }
+}

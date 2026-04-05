@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Subaccount App MVP</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>GHL Subaccount-Target MVP</h1>
+      <p>Single-app MVP for agency-only + bulk-installable subaccount app flow.</p>
+
+      <section>
+        <button id="start-install">Start Agency Install</button>
+        <button id="refresh">Refresh State</button>
+        <input id="company-id" placeholder="companyId" />
+        <button id="remint-all" class="hidden">Re-mint All Locations</button>
+        <p id="remint-note"></p>
+      </section>
+
+      <section>
+        <h2>Config</h2>
+        <pre id="config"></pre>
+      </section>
+
+      <section>
+        <h2>State</h2>
+        <pre id="state"></pre>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+  </html>
