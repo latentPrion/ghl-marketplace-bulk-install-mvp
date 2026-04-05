@@ -15,7 +15,6 @@ The purpose is to serve as a concrete reference implementation for integrating G
 
 - Node.js backend + static frontend
 - Dockerized deployment
-- Designed to run on zambesii VPS at `http://zambesii.com:3210`
 
 ## Notes
 
