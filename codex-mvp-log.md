@@ -1,299 +1,273 @@
 # Codex MVP Log
 
-## 2026-04-05
+## Final Distillation
 
-### GHL App Setup Confirmed
+This file is the final distillation of the MVP work done to understand how private GHL marketplace installation flows actually behave for direct location installs, agency installs, and agency-driven bulk installs.
 
-- `dotenv.env` present with:
-  - `GHL_MARKETPLACE_APP_APP_CLIENT_ID=69d213c14b99ed1d58caea5c-mnlhcofk,`
-  - standard install URL
-  - white-label install URL
-- `scopes.md` present with Autobroker-oriented scope notes.
-- User reports:
-  - new GHL agency created
-  - private app created
-  - three subaccounts created
-  - admin user created under each subaccount
+## Objective
 
-### Important Caveats
+- Validate the real GHL behavior for private marketplace installs instead of relying on docs or guesses.
+- Build a minimal reference implementation that can:
+  - accept direct location installs
+  - accept agency installs
+  - bulk mint location tokens from a company token
+  - handle partial failure and recovery
+  - support future automatic installation behavior
 
-- The `CLIENT_ID` line currently has a trailing comma in `dotenv.env`. This must be removed before the app uses it.
-- The install URLs include:
-  - `locations/customValues.readonly`
-  - `locations/customValues.write`
-- `scopes.md` currently documents:
-  - `locations/customFields.readonly`
-  - `locations/customFields.write`
-- Scope naming must be reconciled against the actual app configuration before implementation.
+## Final Validated App Model
 
-### Identifier Notes
+The working private-app model was:
 
-- The install URLs contain `version_id=69d213c14b99ed1d58caea5c`.
-- This is definitely the app version identifier.
-- The separate Marketplace `App ID` was not yet located in the UI and is not currently blocking initial MVP scaffolding.
+- target user: `Sub-Account`
+- who can install: `Agency Only`
+- bulk install: `Yes`
 
-### Immediate Next Step
+This was the configuration that produced a company token on agency install and allowed company-to-location minting.
 
-- Normalize `.env` values and scope names.
-- Then scaffold the WEBHOST_SERVER-hosted MVP app in `WEBHOST_APP_PATH` with:
-  - frontend + backend
-  - Docker config stored in the app directory
-  - external exposure on the WEBHOST_SERVER
-  - OAuth callback handling for GHL install testing
+For clarity: this was the validated configuration for company-token bulk install behavior. The backend still needs to keep handling direct location-token callbacks as well, because legacy/manual installs and other private install paths can still arrive that way.
 
-### MVP Scaffold + WEBHOST_SERVER Deployment Progress
+The separate agency-targeted private app path was not the winning model. In practice, it was blocked by GHL scope restrictions because the agency-targeted app could not be granted `oauth.readonly` and `oauth.write`, which are required for unattended installed-location discovery and company-to-location minting.
 
-- Implemented MVP code scaffold:
-  - backend: `src/server.js`, `src/config.js`, `src/ghl-oauth.js`, `src/state-store.js`, `src/state-signing.js`
-  - frontend: `public/index.html`, `public/app.js`, `public/styles.css`
-  - containerization: `Dockerfile`, `docker-compose.yml`, `.dockerignore`
-  - runtime env template: `.env.example`
-  - target conformance tracker: `target-webapp-fixes.md`
-- Storage model in MVP aligns table naming with `schema.md`:
-  - `ghl_oauth_tokens`
-  - `ghl_oauth_location_tokens`
-  - `portal_user_desking_mappings` (present as schema-aligned placeholder table in persisted state)
-- Added callback model handling for:
-  - location install token exchange + persistence
-  - agency install company token persistence
-  - agency installed-locations discovery + company->location token mint loop
+## Final Installation Model
 
-### WEBHOST_SERVER Runtime State (WEBHOST_DOMAIN_NAME)
+- Direct location install returns a location token and should persist a row in `ghl_oauth_location_tokens`.
+- Agency install, when performed through the validated subaccount-target / agency-only / bulk-enabled app, returns a company token and should persist a row in `ghl_oauth_tokens`.
+- Agency install must not stop at storing the company token. It must immediately discover the installed subaccounts for that app and mint location tokens for all of them.
+- A later agency install must be allowed to replace older location-level tokens for the same app. Agency install becomes the authoritative parent install for that app/token key.
 
-- Synced MVP code to `WEBHOST_APP_PATH`.
-- Container is running and externally reachable:
-  - `marketplace-app-mvp` on `0.0.0.0:3210->3210/tcp`
-  - health check success:
-    - local on WEBHOST_SERVER: `curl http://127.0.0.1:3210/health`
-    - external: `curl http://WEBHOST_DOMAIN_NAME:3210/health`
+## Required GHL Install Choices
 
-### Docker Access Model Update
+Two GHL install checkboxes turned out to be operationally significant:
 
-- Applied host change so Docker commands can run without root for `codex`:
-  - ensured `docker` group exists
-  - `usermod -aG docker codex`
-  - verified fresh session includes `docker` group
-  - verified `docker ps` works unprivileged
-- Updated WEBHOST_SERVER skill + host facts to codify this behavior and validated the skill.
+- `approveAllLocations` / "Install under all locations"
+- `installToFutureLocations` / "Install in future locations"
 
-### Pending for Next Step
+These are not optional niceties if the backend is expected to bulk mint location tokens without manual reapproval:
 
-- Live GHL install-flow validation (location + agency + bulk mint) through browser interaction.
-- Update Marketplace app redirect URI in GHL app settings to point at the MVP callback once final public callback URL is selected.
+- If `approveAllLocations` is not enabled, the app is not entitled across all current subaccounts and bulk mint assumptions become invalid.
+- If `installToFutureLocations` is not enabled, newly created subaccounts will not automatically receive the app and webhook-driven auto-mint will not reliably happen.
 
-### Env + Redirect Sync Applied
+## Callback And State Conclusions
 
-- User updated GHL redirect URI to `http://WEBHOST_DOMAIN_NAME:3210/oauth/callback`.
-- User updated standard + white-label install links in local `dotenv.env`.
-- Synced workspace to WEBHOST_SERVER deployment path `WEBHOST_APP_PATH`.
-- Restarted container: `docker-compose restart marketplace-app-mvp` (non-root docker execution as `codex`).
-- Verified deployed `dotenv.env` now contains install URLs with `redirect_uri=http://WEBHOST_DOMAIN_NAME:3210/oauth/callback`.
-- Verified runtime config endpoint:
-  - `appBaseUrl: http://WEBHOST_DOMAIN_NAME:3210`
-  - `redirectUri: http://WEBHOST_DOMAIN_NAME:3210/oauth/callback`
+- `state` is backend-generated install context. It is useful for:
+  - intended install type
+  - expected location
+  - safe return URL
+- GHL can omit `state` on callback in real flows.
+- GHL can also omit `locationId` from the token response.
+- A robust backend must therefore accept missing-state callbacks and infer the flow from:
+  - callback query params
+  - token payload fields
+  - JWT payload inference when needed
 
-### Live Validation: Location Install Flow
+Rejecting callback traffic just because `state` is missing is too brittle for live GHL behavior.
 
-- User completed location install flow via:
-  - `/oauth/install?installType=location&returnTo=http%3A%2F%2FWEBHOST_DOMAIN_NAME%3A3210%2F`
-- MVP callback captured:
-  - `locationId = PQujQwLFNjKVnr6MwDPk`
-  - `companyId = HEeQEAbTtnRGG1XZOp0f`
-  - event `oauth_callback_location_success`
-- Schema-aligned persistence confirmed in `ghl_oauth_location_tokens`:
-  - `token_key`
-  - `location_id`
-  - `company_id`
-  - `access_token`
-  - `access_expires_at`
-  - `refresh_token`
-  - `refresh_token_id`
-  - `scope`
-  - `updated_at`/`created_at`
-  - `install_type = location`
-- `ghl_oauth_tokens` remains empty at this stage (expected prior to agency install flow).
+## Live Endpoint Contract Findings
 
-### Agency Install 404 Fix
+The important live endpoint findings were:
 
-- Observed failure: agency install URL redirected to:
-  - `https://marketplace.gohighlevel.com/oauth/chooseagency?...`
-  - Result: marketplace 404 page.
-- Root cause:
-  - MVP fallback builder used `/oauth/chooseagency` for `installType=agency` when no explicit agency URL was configured.
-- Fix applied:
-  - Updated `src/server.js` install URL builder to use:
-    - configured standard/white-label chooser URLs when present, regardless of install type
-    - `/oauth/chooselocation` as fallback endpoint
-  - Removed dependency on `/oauth/chooseagency` fallback.
-- Deployment:
-  - Synced to WEBHOST_SERVER
-  - forced container rebuild/recreate (`docker-compose up -d --build --force-recreate marketplace-app-mvp`)
-- Verification:
-  - `GET /oauth/install?installType=agency...` now returns `302` with `Location: https://marketplace.gohighlevel.com/oauth/chooselocation?...`
+### `/oauth/installedLocations`
 
-### Live Validation: Agency Install UX + Callback Semantics
+- requires a company bearer token
+- requires the `Version` header
+- requires both `companyId` and `appId`
+- returns location identifiers under `_id` in live responses
 
-- Browser verification in live GHL session (`/agency_launchpad`) confirms user is logged in at agency level.
-- Marketplace install UX for this private app still routes through `oauth/chooselocation` and prompts for subaccount selection.
-- There is no separate visible “agency-level option” in this chooser screen for this app config.
-- Selecting a subaccount in this flow still completed callback with:
-  - `connected=1`
-  - `install_type=agency`
-  - `company_id=HEeQEAbTtnRGG1XZOp0f`
-- MVP persisted an agency/company token row in `ghl_oauth_tokens` and emitted `oauth_callback_agency_success`.
+### `/oauth/locationToken`
 
-### Agency Bulk Mint Follow-up Fix
+- requires a company bearer token
+- requires the `Version` header
+- accepts `application/x-www-form-urlencoded`
+- body fields are `companyId` and `locationId`
 
-- Observed issue during agency callback bulk phase:
-  - `Installed locations request failed (401): version header was not found.`
-- Root cause:
-  - requests to `/oauth/installedLocations` and `/oauth/locationToken` lacked required `Version` header.
-- Fix applied:
-  - added configurable `GHL_API_VERSION` (default `2021-07-28`) in `src/config.js`
-  - added versioned header injection for installed-locations and location-token calls in `src/ghl-oauth.js`
-  - exposed `ghlApiVersion` from `/api/config` for runtime verification
-  - documented `GHL_API_VERSION` in `.env.example`
+The MVP initially failed until these exact contract details were used.
 
-### Installation Details Root Cause (No Agency Option in UI)
+## Reliability Findings
 
-- Queried marketplace installation details endpoint for this app:
-  - `GET https://backend.leadconnectorhq.com/marketplace/app/installationDetails?appId=69d213c14b99ed1d58caea5c&versionId=69d213c14b99ed1d58caea5c`
-- Key finding:
-  - `integration.userTypes = ["Location"]`
-- Effect:
-  - chooser shows subaccount selection only
-  - no agency/company install option is available in current app config
-  - `/oauth/token` exchange returns a token with `user_type=Location` even when requesting `user_type=Company`
-  - downstream agency endpoints reject this token (`This token's user type is not yet supported!`)
-- Additional confirmed identifier:
-  - `integration.appId = 69d213c14b99ed1d58caea5c`
+- Company-token install and location-token minting are not always immediately consistent at callback time.
+- Bounded retry materially improved install-time success.
+- The backend should persist install-quality metadata so operators can see whether agency install minting completed fully or partially.
+- A manual "re-mint all locations" recovery path is required when callback-time minting remains incomplete after retries.
 
-### Dual-App Runtime Support Added
+## Future-Location Auto-Install Model
 
-- User created a second app with agency-level target user and added env vars prefixed:
-  - `GHL_AGENCY_MARKETPLACE_APP_APP_*`
-- MVP runtime updated to support dual OAuth profiles:
-  - `primary` profile (existing location/subaccount app)
-  - `agency` profile (new agency-targeted app)
-- `/oauth/install` now chooses profile by `installType`:
-  - `location` -> `primary`
-  - `agency` -> `agency` when configured (fallback to `primary` only if needed)
-- Signed OAuth state now includes profile metadata (`profileKey`, `profileTokenKey`) and callback uses it to select matching client credentials for `/oauth/token`.
-- Token persistence now writes with explicit `token_key` per initiating profile, so both apps can coexist in one MVP state store.
-- Agency sync endpoints now resolve company tokens across configured token keys, prioritizing agency profile keys.
+Future subaccount support needs both:
 
-### Live Validation With New Agency App
+- `installToFutureLocations=true` during the agency install
+- an AppInstall webhook handler in the backend
 
-- Confirmed agency app metadata:
-  - `userTypes=["Company"]`
-  - `isAgencyBulkInstallEnabled=true`
-- Live browser install run from MVP (`Start Agency Install`) now redirects with agency app key:
-  - `client_id=69d23450e2ff1434e56c858e-mnlm1xwd`
-  - `version_id=69d23450e2ff1434e56c858e`
-- Marketplace chooser now shows an `Agency` account option (not subaccounts) for this app.
-- Callback succeeded and persisted:
-  - `ghl_oauth_tokens.token_key = 69d23450e2ff1434e56c858e-mnlm1xwd`
-  - `user_type = Company`
-  - `install_type = agency`
-- Agency bulk discovery/mint currently fails with `422 Unprocessable Entity`, consistent with the agency app currently having minimal scopes only:
-  - `users.readonly`
-  - `marketplace-installer-details.readonly`
-  - `locations.readonly`
-- Next required scope additions for full agency bulk model testing:
-  - `oauth.readonly` (installed location discovery)
-  - `oauth.write` (company -> location token mint)
+The webhook must:
 
-### Scope-Limited Agency App Handling (Model Adjustment)
+- identify the correct app/profile
+- resolve the stored company token
+- mint a location token for the newly installed subaccount
+- persist that token into `ghl_oauth_location_tokens`
 
-- User confirmed agency app scope selector does not permit adding `oauth.readonly`/`oauth.write` for this app configuration.
-- MVP adjusted to treat this as a supported constraint:
-  - agency callback now skips bulk discovery/mint when required oauth scopes are missing and records `bulk.skipped.reason=missing_required_scopes`
-  - agency sync endpoints return a clear 400 with required/missing scopes instead of attempting unsupported GHL calls
-- Effective model now:
-  - agency app flow validates company-level install/connectivity
-  - location app flow remains required for location-scoped operational tokens and write scopes
+## Data-Model Conclusions
 
-### Webhook Auto-Mint Implementation
+### `ghl_oauth_tokens`
 
-- Implemented webhook-driven auto-mint pipeline in MVP backend:
-  - `POST /webhooks/ghl/app-install`
-    - accepts AppInstall payloads (`type=INSTALL`, `companyId`, `locationId`, `appId`/`versionId`)
-    - resolves matching OAuth profile by `profileKey`, `profileTokenKey`, `versionId`, or `appId`
-    - loads corresponding stored company token
-    - if token has required oauth scopes, exchanges company token -> location token and stores it as `install_type=webhook_install`
-  - `POST /api/debug/simulate-app-install`
-    - debug helper to simulate webhook payloads and validate behavior end-to-end
-- Added webhook processing events to MVP log stream:
-  - `ghl_webhook_event_received`
-  - `ghl_webhook_install_mint_success`
-  - `ghl_webhook_install_mint_failed`
-  - `ghl_webhook_install_skipped`
+This table should hold company tokens keyed by `(token_key, company_id)` and should also carry:
 
-### Webhook Demo Result (Current Tenant Constraints)
+- granted scopes
+- install type / install context
+- refresh bookkeeping
+- install completeness fields
 
-- Webhook path is live and validated on WEBHOST_SERVER.
-- Simulated and direct POST webhook calls both processed successfully.
-- With current stored agency token scopes (`users.readonly marketplace-installer-details.readonly locations.readonly`), webhook auto-mint is correctly skipped with explicit diagnostics:
-  - missing required scopes: `oauth.readonly`, `oauth.write`
-- This confirms implementation correctness and current platform scope constraint as the remaining blocker for successful unattended mint.
+The install completeness fields validated by the MVP were:
 
-### Breakthrough: Subaccount App Agency-Only + Bulk Enabled
+- `installation_bulk_mint_complete`
+- `installation_bulk_mint_attempted_at`
+- `installation_bulk_mint_discovered`
+- `installation_bulk_mint_minted`
+- `installation_bulk_mint_failed`
+- `installation_bulk_mint_retry_attempts`
+- `remint_required`
+- `last_remint_attempt_at`
+- `last_remint_success`
 
-- User changed subaccount app listing configuration to:
-  - target user: `Sub-Account`
-  - who can install: `Agency Only`
-  - bulk install: `Yes`
-- Live browser install on `2026-04-05` now shows:
-  - agency row in account picker
-  - `Install under all locations` checkbox
-- Callback for primary profile now yields:
-  - `tokenUserType=Company`
-  - company token persisted under primary token key (`69d213c14b99ed1d58caea5c-mnlhcofk`)
+### `ghl_oauth_location_tokens`
 
-### API Fixes for Installed-Locations + Mint
+This table should hold location tokens keyed by `(token_key, location_id)` and should be linked to the company-token row that minted them when the source install was agency/company-based.
 
-- Root causes found and fixed in MVP:
-  1. `GET /oauth/installedLocations` requires both `companyId` and `appId` query params.
-  2. Response location objects use `_id`; parser now accepts `_id` in addition to `locationId`/`id`.
-  3. `POST /oauth/locationToken` works with `application/x-www-form-urlencoded` body (`companyId`, `locationId`) per current docs.
-  4. Manual sync/installed-location endpoints now resolve the stored company token that actually has required oauth scopes.
-- Deployed fixes to WEBHOST_SERVER Docker and verified:
-  - `GET /api/agency/installed-locations?companyId=HEeQEAbTtnRGG1XZOp0f` returns 3 location IDs.
-  - `POST /api/agency/sync-locations` with `{"companyId":"HEeQEAbTtnRGG1XZOp0f","fetchInstalled":true}` returns:
-    - `discovered=3`
-    - `mintedCount=3`
-    - `failedCount=0`
+On agency install, location-token rows for that token key must be purged and replaced if they:
 
-### Auto-Mint Path Validation
+- have no company-token link
+- point at the wrong company token
+- point at a company token whose access token is null or invalid
 
-- `POST /api/debug/simulate-app-install` using app/version of primary profile now succeeds:
-  - result: `minted=true`
-  - token key used: `69d213c14b99ed1d58caea5c-mnlhcofk`
-- This confirms end-to-end viability for:
-  - company-token discovery of installed subaccounts
-  - location token mint per installation event
+## Precise Invalidate-On-New-Company-Install Behavior
 
-### Install-Time Retry + Manual Re-mint UX (2026-04-05)
+The MVP behavior here was specific and should be preserved exactly.
 
-- Added callback-time bounded retry for agency bulk mint:
-  - env/config: `BULK_MINT_RETRY_ATTEMPTS` (default `4`)
-  - env/config: `BULK_MINT_RETRY_DELAY_MS` (default `3000`)
-  - callback now executes `runBulkMintWithRetry(...)` before declaring install mint status.
-- Added install-quality fields on the company token row to persist whether all discovered location tokens were minted during install:
-  - `installation_bulk_mint_complete` (boolean)
-  - `installation_bulk_mint_attempted_at` (ISO timestamp)
-  - `installation_bulk_mint_discovered` (number)
-  - `installation_bulk_mint_minted` (number)
-  - `installation_bulk_mint_failed` (number)
-  - `installation_bulk_mint_retry_attempts` (number)
-  - `remint_required` (boolean)
-  - `last_remint_attempt_at`, `last_remint_success`
-- Added backend manual recovery endpoint:
-  - `POST /api/agency/remint-all`
-  - behavior: FK cleanup (`purgeInvalidLocationTokenLinks`) + bounded retry remint for all installed locations
-  - updates company-token remint status fields.
-- Added frontend recovery controls:
-  - company ID input + `Re-mint All Locations` button
-  - button only appears when install-time mint status is incomplete (`installation_bulk_mint_complete=false` or `remint_required=true`)
-  - UI guidance text now explicitly tells agency owner to run re-mint when install minting was partial/failed.
-- Updated `target-webapp-fixes.md` with the same requirement so the target webapp tracks and enforces this operator-visible install status model.
+### Trigger
+
+Run invalidation immediately after:
+
+1. the agency/company callback exchanges the code for a company token
+2. the new company token row is upserted into `ghl_oauth_tokens`
+3. before any bulk remint begins
+
+The invalidation target is scoped by `token_key`. In other words, this cleanup is for "all location tokens belonging to this marketplace app installation profile", not for unrelated apps.
+
+### Authoritative parent row
+
+After upsert, the newly persisted company-token row becomes the authoritative parent row for that callback. The MVP then keeps only location-token rows whose parent link matches:
+
+- `parent.id === newCompanyTokenRow.id`
+- `parent.company_id === newCompanyTokenRow.company_id`
+
+Everything else for that `token_key` is treated as stale or invalid.
+
+### Deletion rules
+
+For each row in `ghl_oauth_location_tokens` for the current `token_key`:
+
+- Keep it if its `company_token_id` points to an existing company-token row and that parent row is the exact newly upserted company-token row and that parent row has the same `company_id` as the new row.
+- Delete it if `company_token_id` is null or blank.
+- Delete it if `company_token_id` points to no existing company-token row.
+- Delete it if the parent company-token row exists but its `access_token` is null or structurally invalid.
+- Delete it if the parent company-token row exists but is not the new authoritative company-token row, even if it belongs to the same app/token key.
+- Delete it if the parent company-token row exists but its `company_id` does not match the new authoritative row.
+
+### Important implication
+
+The MVP did not merely delete "rows for a different company id." It deleted every location-token row for the app/token key that was not linked to the exact new authoritative company-token row.
+
+That means a new agency install is treated as the owner of the app/token-key install state for that app profile.
+
+### Categories recorded by the MVP
+
+The MVP tracked the purge result using these buckets:
+
+- `deletedOrphanFk`
+  - row had no `company_token_id`, or the FK pointed to a missing company-token row
+- `deletedInvalidParentToken`
+  - parent company-token row existed, but its access token was null or structurally invalid
+- `deletedWrongCompanyLink`
+  - parent company-token row existed and was valid, but it was not the exact new authoritative parent row
+
+It also recorded:
+
+- `beforeTotal`
+- `afterTotal`
+- `deletedTotal`
+- `beforeForApp`
+- `afterForApp`
+- `deletedForApp`
+- `targetCompanyId`
+- `targetCompanyTokenId`
+
+### Why this aggressive invalidation exists
+
+This behavior is what allowed the MVP to correctly handle the tested case where:
+
+- one subaccount had already been installed directly at location level
+- a later agency install was performed
+- all location tokens, including the previously direct-installed one, needed to be reminted under the new company-token parent
+
+Without this invalidation, the system would retain mixed provenance rows and the target state would no longer mean "all location tokens for this app come from the current authoritative agency install."
+
+### What happens after invalidation
+
+Immediately after invalidation:
+
+- discover installed locations for the current company/app
+- mint fresh location tokens for those installed locations
+- persist each reminted location token with:
+  - the same `token_key`
+  - its `location_id`
+  - the new `company_id`
+  - `company_token_id = newCompanyTokenRow.id`
+  - `install_type = agency_bulk`
+
+### Failure semantics
+
+If some remints fail after invalidation:
+
+- the rows already deleted stay deleted
+- successful remints remain stored against the new company-token row
+- failed locations remain missing until retry or manual re-mint succeeds
+- the company-token row must be marked with incomplete install status so the operator can recover
+
+That exact partial-state handling was part of the validated MVP behavior.
+
+## What The MVP Proved Against The Target Webapp
+
+The target webapp already has several important pieces:
+
+- stateful callback handling
+- stateless callback fallback
+- company token persistence
+- location token persistence
+- JWT-based location inference
+- on-demand company-to-location mint when a location token is missing
+- mismatch warning behavior when a later agency install changes company linkage
+
+The target webapp does not yet implement the complete private bulk-install model that the MVP validated.
+
+## Final Delta To Close
+
+The missing pieces between the target webapp and the validated MVP are:
+
+- installed-location discovery for a company/app pair
+- agency install bulk mint for all installed locations
+- live endpoint contract fixes for `installedLocations` and `locationToken`
+- install-time retry and persisted mint-completeness state
+- manual re-mint endpoint and UI
+- AppInstall webhook ingestion for future subaccounts
+- stronger operator guidance around required GHL install-time checkboxes
+
+## Final Conclusion
+
+The correct production model is not "one agency app plus one location app."
+
+The validated private bulk-install model is:
+
+- one private app targeting `Sub-Account`
+- installed by `Agency`
+- bulk install enabled
+- backend capable of handling both company-token and location-token callback shapes
+- backend capable of bulk mint, remint, and future-location webhook minting
+
+That is the model the target webapp should be brought into conformance with.
