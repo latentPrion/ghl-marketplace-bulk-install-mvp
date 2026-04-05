@@ -1,6 +1,6 @@
-# Autobroker OAuth + Login-Related DB Schema (from live VPS-backed DB)
+# Autobroker OAuth + Login-Related DB Schema (from live WEBHOST_SERVER-backed DB)
 
-Generated from Supabase PostgREST OpenAPI via VPS on 2026-04-05T08:58:26.619Z.
+Generated from Supabase PostgREST OpenAPI via WEBHOST_SERVER on 2026-04-05T08:58:26.619Z.
 
 ## Notes
 

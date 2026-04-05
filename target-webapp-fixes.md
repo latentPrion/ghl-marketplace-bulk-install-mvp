@@ -51,7 +51,7 @@ Treat these two checkboxes as required install controls, not optional UX toggles
 
 ## Validation Notes
 
-Validated against live zambesii-hosted MVP and logged-in GHL agency session:
+Validated against live WEBHOST_SERVER-hosted MVP and logged-in GHL agency session:
 
 - agency chooser UX currently presents subaccount selection (no separate agency install button observed)
 - agency callback completed with `install_type=agency` and `company_id`

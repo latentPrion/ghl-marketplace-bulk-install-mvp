@@ -35,13 +35,13 @@
 ### Immediate Next Step
 
 - Normalize `.env` values and scope names.
-- Then scaffold the VPS-hosted MVP app in `/data/www/marketplace-app-app` with:
+- Then scaffold the WEBHOST_SERVER-hosted MVP app in `WEBHOST_APP_PATH` with:
   - frontend + backend
   - Docker config stored in the app directory
-  - external exposure on the VPS
+  - external exposure on the WEBHOST_SERVER
   - OAuth callback handling for GHL install testing
 
-### MVP Scaffold + VPS Deployment Progress
+### MVP Scaffold + WEBHOST_SERVER Deployment Progress
 
 - Implemented MVP code scaffold:
   - backend: `src/server.js`, `src/config.js`, `src/ghl-oauth.js`, `src/state-store.js`, `src/state-signing.js`
@@ -58,14 +58,14 @@
   - agency install company token persistence
   - agency installed-locations discovery + company->location token mint loop
 
-### VPS Runtime State (zambesii.com)
+### WEBHOST_SERVER Runtime State (WEBHOST_DOMAIN_NAME)
 
-- Synced MVP code to `/data/www/marketplace-app-app`.
+- Synced MVP code to `WEBHOST_APP_PATH`.
 - Container is running and externally reachable:
   - `marketplace-app-mvp` on `0.0.0.0:3210->3210/tcp`
   - health check success:
-    - local on VPS: `curl http://127.0.0.1:3210/health`
-    - external: `curl http://zambesii.com:3210/health`
+    - local on WEBHOST_SERVER: `curl http://127.0.0.1:3210/health`
+    - external: `curl http://WEBHOST_DOMAIN_NAME:3210/health`
 
 ### Docker Access Model Update
 
@@ -74,7 +74,7 @@
   - `usermod -aG docker codex`
   - verified fresh session includes `docker` group
   - verified `docker ps` works unprivileged
-- Updated zambesii skill + host facts to codify this behavior and validated the skill.
+- Updated WEBHOST_SERVER skill + host facts to codify this behavior and validated the skill.
 
 ### Pending for Next Step
 
@@ -83,19 +83,19 @@
 
 ### Env + Redirect Sync Applied
 
-- User updated GHL redirect URI to `http://zambesii.com:3210/oauth/callback`.
+- User updated GHL redirect URI to `http://WEBHOST_DOMAIN_NAME:3210/oauth/callback`.
 - User updated standard + white-label install links in local `dotenv.env`.
-- Synced workspace to zambesii deployment path `/data/www/marketplace-app-app`.
+- Synced workspace to WEBHOST_SERVER deployment path `WEBHOST_APP_PATH`.
 - Restarted container: `docker-compose restart marketplace-app-mvp` (non-root docker execution as `codex`).
-- Verified deployed `dotenv.env` now contains install URLs with `redirect_uri=http://zambesii.com:3210/oauth/callback`.
+- Verified deployed `dotenv.env` now contains install URLs with `redirect_uri=http://WEBHOST_DOMAIN_NAME:3210/oauth/callback`.
 - Verified runtime config endpoint:
-  - `appBaseUrl: http://zambesii.com:3210`
-  - `redirectUri: http://zambesii.com:3210/oauth/callback`
+  - `appBaseUrl: http://WEBHOST_DOMAIN_NAME:3210`
+  - `redirectUri: http://WEBHOST_DOMAIN_NAME:3210/oauth/callback`
 
 ### Live Validation: Location Install Flow
 
 - User completed location install flow via:
-  - `/oauth/install?installType=location&returnTo=http%3A%2F%2Fzambesii.com%3A3210%2F`
+  - `/oauth/install?installType=location&returnTo=http%3A%2F%2FWEBHOST_DOMAIN_NAME%3A3210%2F`
 - MVP callback captured:
   - `locationId = PQujQwLFNjKVnr6MwDPk`
   - `companyId = HEeQEAbTtnRGG1XZOp0f`
@@ -126,7 +126,7 @@
     - `/oauth/chooselocation` as fallback endpoint
   - Removed dependency on `/oauth/chooseagency` fallback.
 - Deployment:
-  - Synced to zambesii
+  - Synced to WEBHOST_SERVER
   - forced container rebuild/recreate (`docker-compose up -d --build --force-recreate marketplace-app-mvp`)
 - Verification:
   - `GET /oauth/install?installType=agency...` now returns `302` with `Location: https://marketplace.gohighlevel.com/oauth/chooselocation?...`
@@ -231,7 +231,7 @@
 
 ### Webhook Demo Result (Current Tenant Constraints)
 
-- Webhook path is live and validated on zambesii.
+- Webhook path is live and validated on WEBHOST_SERVER.
 - Simulated and direct POST webhook calls both processed successfully.
 - With current stored agency token scopes (`users.readonly marketplace-installer-details.readonly locations.readonly`), webhook auto-mint is correctly skipped with explicit diagnostics:
   - missing required scopes: `oauth.readonly`, `oauth.write`
@@ -257,7 +257,7 @@
   2. Response location objects use `_id`; parser now accepts `_id` in addition to `locationId`/`id`.
   3. `POST /oauth/locationToken` works with `application/x-www-form-urlencoded` body (`companyId`, `locationId`) per current docs.
   4. Manual sync/installed-location endpoints now resolve the stored company token that actually has required oauth scopes.
-- Deployed fixes to zambesii Docker and verified:
+- Deployed fixes to WEBHOST_SERVER Docker and verified:
   - `GET /api/agency/installed-locations?companyId=HEeQEAbTtnRGG1XZOp0f` returns 3 location IDs.
   - `POST /api/agency/sync-locations` with `{"companyId":"HEeQEAbTtnRGG1XZOp0f","fetchInstalled":true}` returns:
     - `discovered=3`
